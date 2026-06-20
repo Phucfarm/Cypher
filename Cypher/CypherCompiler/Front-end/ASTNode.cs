@@ -184,4 +184,273 @@ namespace CypherCompiler
         }
     }
     #endregion
+    #region Expression Nodes
+    // Thằng bọc các hằng số, chuỗi, ký tự, boolean hoặc null (ví dụ: 42, 3.14, "hello", true, null). LLVM sinh mã hằng (constant) cực nhanh qua thằng này.
+    public class LiteralExpressionNode : ExpressionNode
+    {
+        public Token LiteralToken { get; init; }
+        public LiteralExpressionNode(Token LiteralTokenParam)
+        {
+            LiteralToken = LiteralTokenParam;
+        }
+    }
+    // Thằng bọc tên biến, tên hàm hoặc thực thể (ví dụ: x, MyVariable). Dùng để tra cứu địa chỉ ô nhớ trong Symbol Table khi phát sinh mã IR.
+    public class IdentifierExpressionNode : ExpressionNode
+    {
+        public Token IdentifierToken { get; init; }
+        public IdentifierExpressionNode(Token IdentifierTokenParam)
+        {
+            IdentifierToken = IdentifierTokenParam;
+        }
+    }
+    // Thằng xử lý toán tử một ngôi (ví dụ: -x, !flag, ~mask). Giữ token toán tử để biết lệnh LLVM tương ứng (neg, not).
+    public class UnaryExpressionNode : ExpressionNode
+    {
+        public Token OperatorToken { get; init; }
+        public ExpressionNode Operand { get; init; }
+        public UnaryExpressionNode(Token OperatorTokenParam, ExpressionNode OperandParam)
+        {
+            OperatorToken = OperatorTokenParam;
+            Operand = OperandParam;
+        }
+    }
+    // Thằng gánh team tính toán nhị phân (ví dụ: a + b, x * y, i == 0). Gom hai vế Left/Right để Binder check ép kiểu và LLVM gen lệnh toán hạng.
+    public class BinaryExpressionNode : ExpressionNode
+    {
+        public ExpressionNode Left { get; init; }
+        public Token OperatorToken { get; init; }
+        public ExpressionNode Right { get; init; }
+        public BinaryExpressionNode(ExpressionNode LeftParam, Token OperatorTokenParam, ExpressionNode RightParam)
+        {
+            Left = LeftParam;
+            OperatorToken = OperatorTokenParam;
+            Right = RightParam;
+        }
+    }
+    // Thằng xử lý các biểu thức gán (ví dụ: x = 10, gán phức hợp x += 5). Tách biệt vế trái (thường là LValue) để LLVM biết địa chỉ cần Store dữ liệu vào.
+    public class AssignmentExpressionNode : ExpressionNode
+    {
+        public ExpressionNode Left { get; init; }
+        public Token OperatorToken { get; init; }
+        public ExpressionNode Right { get; init; }
+        public AssignmentExpressionNode(ExpressionNode LeftParam, Token OperatorTokenParam, ExpressionNode RightParam)
+        {
+            Left = LeftParam;
+            OperatorToken = OperatorTokenParam;
+            Right = RightParam;
+        }
+    }
+    // Thằng bọc biểu thức gọi hàm (ví dụ: Print(x, 1), Calculate()). Giữ Target (có thể là tên hàm hoặc con trỏ hàm) và danh sách tham số truyền vào.
+    public class InvocationExpressionNode : ExpressionNode
+    {
+        public ExpressionNode Target { get; init; }
+        public List<ExpressionNode> Arguments { get; init; }
+        public InvocationExpressionNode(ExpressionNode TargetParam, List<ExpressionNode> ArgumentsParam)
+        {
+            Target = TargetParam;
+            Arguments = ArgumentsParam;
+        }
+    }
+    // Thằng truy cập thành viên qua dấu chấm (ví dụ: obj.Member, math.PI). Cần thiết để LLVM tính toán offset hoặc xuất lệnh trích xuất phần tử.
+    public class MemberAccessExpressionNode : ExpressionNode
+    {
+        public ExpressionNode Expression { get; init; }
+        public Token OperatorToken { get; init; }
+        public Token MemberToken { get; init; }
+        public MemberAccessExpressionNode(ExpressionNode ExpressionParam, Token OperatorTokenParam, Token MemberTokenParam)
+        {
+            Expression = ExpressionParam;
+            OperatorToken = OperatorTokenParam;
+            MemberToken = MemberTokenParam;
+        }
+    }
+    // Thằng bọc biểu thức khởi tạo vùng nhớ mới (ví dụ: new Point(10, 20)). Giữ Type để biết size cần cấp phát và Arguments để gọi trúng Constructor.
+    public class NewExpressionNode : ExpressionNode
+    {
+        public Token NewToken { get; init; }
+        public TypeSyntax Type { get; init; }
+        public List<ExpressionNode> Arguments { get; init; }
+        public NewExpressionNode(Token NewTokenParam, TypeSyntax TypeParam, List<ExpressionNode> ArgumentsParam)
+        {
+            NewToken = NewTokenParam;
+            Type = TypeParam;
+            Arguments = ArgumentsParam;
+        }
+    }
+    // Thằng bọc từ khóa ngữ cảnh đại diện đối tượng hiện tại (this) hoặc lớp cha (base).
+    public class ThisOrBaseExpressionNode : ExpressionNode
+    {
+        public Token KeywordToken { get; init; }
+        public ThisOrBaseExpressionNode(Token KeywordTokenParam)
+        {
+            KeywordToken = KeywordTokenParam;
+        }
+    }
+    // Thằng bọc biểu thức nằm trong dấu ngoặc đơn (ví dụ: (a + b)). Giúp Parser giữ đúng độ ưu tiên toán tử trước khi hạ cây xuống LLVM.
+    public class ParenthesizedExpressionNode : ExpressionNode
+    {
+        public Token OpenParenToken { get; init; }
+        public ExpressionNode Expression { get; init; }
+        public Token CloseParenToken { get; init; }
+        public ParenthesizedExpressionNode(Token OpenParenTokenParam, ExpressionNode ExpressionParam, Token CloseParenTokenParam)
+        {
+            OpenParenToken = OpenParenTokenParam;
+            Expression = ExpressionParam;
+            CloseParenToken = CloseParenTokenParam;
+        }
+    }
+    #endregion
+    #region Statement Nodes
+    // Cặp ngoặc nhọn thần thánh { ... } gom cụm các lệnh cục bộ. LLVM nhìn vào đây để quản lý scope (phạm vi sóng) của các biến.
+    public class BlockStatementNode : StatementNode
+    {
+        public Token OpenBraceToken { get; init; }
+        public List<StatementNode> Statements { get; init; }
+        public Token CloseBraceToken { get; init; }
+        public BlockStatementNode(Token OpenBraceTokenParam, List<StatementNode> StatementsParam, Token CloseBraceTokenParam)
+        {
+            OpenBraceToken = OpenBraceTokenParam;
+            Statements = StatementsParam;
+            CloseBraceToken = CloseBraceTokenParam;
+        }
+    }
+    // Khai báo biến cục bộ trong hàm (ví dụ: int x = 5; hoặc const float PI = 3.14;). LLVM sẽ dùng lệnh 'alloca' để cấp phát trên Stack.
+    public class LocalVariableDeclarationStatementNode : StatementNode
+    {
+        public List<Token> Modifiers { get; init; } // Cho phép bắt 'const', 'readonly' cục bộ
+        public TypeSyntax Type { get; init; }
+        public Token IdentifierToken { get; init; }
+        public ExpressionNode Initializer { get; init; }
+        public LocalVariableDeclarationStatementNode(List<Token> ModifiersParam, TypeSyntax TypeParam, Token IdentifierTokenParam, ExpressionNode InitializerParam)
+        {
+            Modifiers = ModifiersParam;
+            Type = TypeParam;
+            IdentifierToken = IdentifierTokenParam;
+            Initializer = InitializerParam;
+        }
+    }
+    // Biến một biểu thức thành một câu lệnh hợp lệ (ví dụ: x = 5; hoặc DoSomething();). Đuôi chấm phẩy biến Expression thành Statement.
+    public class ExpressionStatementNode : StatementNode
+    {
+        public ExpressionNode Expression { get; init; }
+        public Token SemicolonToken { get; init; }
+        public ExpressionStatementNode(ExpressionNode ExpressionParam, Token SemicolonTokenParam)
+        {
+            Expression = ExpressionParam;
+            SemicolonToken = SemicolonTokenParam;
+        }
+    }
+    // Câu lệnh điều kiện rẽ nhánh (if - else). Gồm biểu thức điều kiện (Condition), nhánh đúng (ThenStatement) và nhánh sai tùy chọn (ElseStatement). LLVM cần để sinh các nhãn nhảy (Branch Instructions).
+    public class IfStatementNode : StatementNode
+    {
+        public Token IfToken { get; init; }
+        public ExpressionNode Condition { get; init; }
+        public StatementNode ThenStatement { get; init; }
+        public Token ElseToken { get; init; }
+        public StatementNode ElseStatement { get; init; }
+        public IfStatementNode(Token IfTokenParam, ExpressionNode ConditionParam, StatementNode ThenStatementParam, Token ElseTokenParam, StatementNode ElseStatementParam)
+        {
+            IfToken = IfTokenParam;
+            Condition = ConditionParam;
+            ThenStatement = ThenStatementParam;
+            ElseToken = ElseTokenParam;
+            ElseStatement = ElseStatementParam;
+        }
+    }
+    // 1. Vòng lặp vô tận: for { ... }
+    // LLVM chỉ cần bắn lệnh nhảy vô điều kiện (br) lặp lại chính nó.
+    public class InfiniteLoopStatementNode : StatementNode
+    {
+        public Token ForToken { get; init; }
+        public StatementNode Body { get; init; }
+        public InfiniteLoopStatementNode(Token ForTokenParam, StatementNode BodyParam)
+        {
+            ForToken = ForTokenParam;
+            Body = BodyParam;
+        }
+    }
+    // 2. Vòng lặp While-like: for (true) { ... } hoặc for (x < 5) { ... }
+    // Chỉ chứa một biểu thức điều kiện duy nhất.
+    public class WhileLoopStatementNode : StatementNode
+    {
+        public Token ForToken { get; init; }
+        public ExpressionNode Condition { get; init; }
+        public StatementNode Body { get; init; }
+        public WhileLoopStatementNode(Token ForTokenParam, ExpressionNode ConditionParam, StatementNode BodyParam)
+        {
+            ForToken = ForTokenParam;
+            Condition = ConditionParam;
+            Body = BodyParam;
+        }
+    }
+    // 3. Vòng lặp For truyền thống: for (int i = 0; i < 5; i++) { ... }
+    // Tách rõ 2 dạng khởi tạo để đảm bảo type-safety: hoặc khai báo biến mới, hoặc dùng biểu thức có sẵn (vd: for (i = 0; ...)). Chỉ một trong hai field có giá trị, field còn lại là null.
+    public class ForLoopStatementNode : StatementNode
+    {
+        public Token ForToken { get; init; }
+        public LocalVariableDeclarationStatementNode DeclarationInitializer { get; init; }
+        public ExpressionStatementNode ExpressionInitializer { get; init; }
+        public ExpressionNode Condition { get; init; }
+        public ExpressionNode Iterator { get; init; }
+        public StatementNode Body { get; init; }
+        public ForLoopStatementNode(Token ForTokenParam, LocalVariableDeclarationStatementNode DeclarationInitializerParam, ExpressionStatementNode ExpressionInitializerParam, ExpressionNode ConditionParam, ExpressionNode IteratorParam, StatementNode BodyParam)
+        {
+            ForToken = ForTokenParam;
+            DeclarationInitializer = DeclarationInitializerParam;
+            ExpressionInitializer = ExpressionInitializerParam;
+            Condition = ConditionParam;
+            Iterator = IteratorParam;
+            Body = BodyParam;
+        }
+    }
+    // 4. Vòng lặp Duyệt mảng/Bộ sưu tập (Foreach-like): for (var item in collection) { ... }
+    // Cần giữ biến chạy (VariableType + Identifier) và tập hợp đích để sinh mã duyệt qua con trỏ hoặc GetEnumerator.
+    public class ForeachLoopStatementNode : StatementNode
+    {
+        public Token ForToken { get; init; }
+        public TypeSyntax VariableType { get; init; } // Có thể là 'var' hoặc kiểu tường minh 'int'
+        public Token IdentifierToken { get; init; }
+        public Token InToken { get; init; }
+        public ExpressionNode Collection { get; init; }
+        public StatementNode Body { get; init; }
+        public ForeachLoopStatementNode(Token ForTokenParam, TypeSyntax VariableTypeParam, Token IdentifierTokenParam, Token InTokenParam, ExpressionNode CollectionParam, StatementNode BodyParam)
+        {
+            ForToken = ForTokenParam;
+            VariableType = VariableTypeParam;
+            IdentifierToken = IdentifierTokenParam;
+            InToken = InTokenParam;
+            Collection = CollectionParam;
+            Body = BodyParam;
+        }
+    }
+    // Lệnh nhảy thoát khỏi hàm (return) kèm giá trị trả về tùy chọn. LLVM dựa vào đây để bắn lệnh 'ret'.
+    public class ReturnStatementNode : StatementNode
+    {
+        public Token ReturnToken { get; init; }
+        public ExpressionNode Expression { get; init; }
+        public ReturnStatementNode(Token ReturnTokenParam, ExpressionNode ExpressionParam)
+        {
+            ReturnToken = ReturnTokenParam;
+            Expression = ExpressionParam;
+        }
+    }
+    // Lệnh bẻ gãy vòng lặp (break). LLVM sẽ phát lệnh nhảy không điều kiện tới nhãn ngay sau vòng lặp hiện tại.
+    public class BreakStatementNode : StatementNode
+    {
+        public Token BreakToken { get; init; }
+        public BreakStatementNode(Token BreakTokenParam)
+        {
+            BreakToken = BreakTokenParam;
+        }
+    }
+    // Lệnh nhảy qua bước (next - tương đương continue trong C#). LLVM sẽ nhảy về nhãn kiểm tra điều kiện hoặc nhãn tăng biến đếm của vòng lặp.
+    public class NextStatementNode : StatementNode
+    {
+        public Token NextToken { get; init; }
+        public NextStatementNode(Token NextTokenParam)
+        {
+            NextToken = NextTokenParam;
+        }
+    }
+    #endregion
 }
