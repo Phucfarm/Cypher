@@ -9,6 +9,7 @@ namespace CypherCompiler
         private int Line = 1;
         private int Column = 1;
         private List<Token> Tokens = new List<Token>();
+        public List<Diagnostic> Diagnostics { get; private set; } = new List<Diagnostic>();
         public List<Token> Tokenize(string SourceParam)
         {
             Source = SourceParam;
@@ -16,6 +17,7 @@ namespace CypherCompiler
             Line = 1;
             Column = 1;
             Tokens = new List<Token>();
+            Diagnostics = new List<Diagnostic>();
             while (Index < Source.Length)
             {
                 char CurrentChar = Source[Index];
@@ -78,6 +80,15 @@ namespace CypherCompiler
                 return true;
             }
             return false;
+        }
+        private void AddDiagnostic(int StartLine, int StartCol, int EndLine, int EndCol, string Message, string ErrorCode)
+        {
+            var NewRange = new Range(new Position(StartLine - 1, StartCol - 1), new Position(EndLine - 1, EndCol - 1));
+            Diagnostics.Add(new Diagnostic(NewRange, Message, code: ErrorCode));
+        }
+        private bool IsValidEscapeChar(char C)
+        {
+            return C == 'n' || C == 't' || C == 'r' || C == '"' || C == '\\' || C == '\'';
         }
         private void ReadOperator()
         {
@@ -355,6 +366,7 @@ namespace CypherCompiler
             }
             else
             {
+                AddDiagnostic(Line, Column, Line, Column + 1, $"Unexpected character: '{CurrentChar}'", "CY0001");
                 Tokens.Add(new Token(TokenType.Unknown, CurrentChar.ToString(), Line, Column));
             }
             Index++;
@@ -400,6 +412,7 @@ namespace CypherCompiler
                 }
                 if (!Closed)
                 {
+                    AddDiagnostic(StartLine, StartColumn, Line, Column, "Unterminated block comment; expected '*/'", "CY0002");
                     Tokens.Add(new Token(TokenType.Unknown, "/*", StartLine, StartColumn));
                 }
             }
@@ -407,16 +420,30 @@ namespace CypherCompiler
         private void ReadString()
         {
             string Value = "";
+            int StartLine = Line;
             int StartColumn = Column;
             Index++;
             Column++;
-            while (Index < Source.Length && Source[Index] != '"')
+            bool IsClosed = false;
+            while (Index < Source.Length)
             {
-                if (Source[Index] == '\\')
+                char CurrentChar = Source[Index];
+                if (CurrentChar == '"')
+                {
+                    IsClosed = true;
+                    Index++;
+                    Column++;
+                    break;
+                }
+                if (CurrentChar == '\\')
                 {
                     if (Index + 1 < Source.Length)
                     {
                         char EscapeChar = Source[Index + 1];
+                        if (!IsValidEscapeChar(EscapeChar))
+                        {
+                            AddDiagnostic(Line, Column, Line, Column + 2, $"Invalid escape sequence: '\\{EscapeChar}'", "CY0005");
+                        }
                         Value += EscapeChar switch
                         {
                             'n' => "\n",
@@ -440,7 +467,7 @@ namespace CypherCompiler
                     Index += 2;
                     continue;
                 }
-                if (MemoryExtensions.StartsWith(Span, "\n"))
+                if (MemoryExtensions.StartsWith(Span, "\n") || MemoryExtensions.StartsWith(Span, "\r"))
                 {
                     Value += "\n";
                     Line++;
@@ -448,48 +475,28 @@ namespace CypherCompiler
                     Index++;
                     continue;
                 }
-                if (MemoryExtensions.StartsWith(Span, "\r"))
-                {
-                    Value += "\r";
-                    Line++;
-                    Column = 1;
-                    Index++;
-                    continue;
-                }
                 Value += Source[Index];
                 Column++;
                 Index++;
             }
-            if (Index < Source.Length)
+            if (IsClosed)
             {
-                Index++;
-                Column++;
-                Tokens.Add(new Token(TokenType.StringLiteral, Value, Line, StartColumn));
+                Tokens.Add(new Token(TokenType.StringLiteral, Value, StartLine, StartColumn));
             }
             else
             {
-                Tokens.Add(new Token(TokenType.Unknown, Value, Line, StartColumn));
+                AddDiagnostic(StartLine, StartColumn, Line, Column, "Unterminated string literal; expected '\"'", "CY0003");
+                Tokens.Add(new Token(TokenType.Unknown, Value, StartLine, StartColumn));
             }
         }
         private void ReadChar()
         {
             string Value = "";
+            int StartLine = Line;
             int StartColumn = Column;
             Index++;
             Column++;
-            if (Index < Source.Length && Source[Index] == '\\')
-            {
-                Value += Source[Index];
-                Index++;
-                Column++;
-                if (Index < Source.Length)
-                {
-                    Value += Source[Index];
-                    Index++;
-                    Column++;
-                }
-            }
-            else if (Index < Source.Length && Source[Index] != '\'')
+            while (Index < Source.Length && Source[Index] != '\'' && Source[Index] != '\n' && Source[Index] != '\r')
             {
                 Value += Source[Index];
                 Index++;
@@ -499,20 +506,29 @@ namespace CypherCompiler
             {
                 Index++;
                 Column++;
-                bool IsValidEscape = Value.Length == 2 && Value[0] == '\\';
+                bool IsValidEscape = Value.Length == 2 && Value[0] == '\\' && IsValidEscapeChar(Value[1]);
                 bool IsValidNormalChar = Value.Length == 1 && Value[0] != '\\';
                 if (IsValidEscape || IsValidNormalChar)
                 {
-                    Tokens.Add(new Token(TokenType.CharLiteral, Value, Line, StartColumn));
+                    Tokens.Add(new Token(TokenType.CharLiteral, Value, StartLine, StartColumn));
                 }
                 else
                 {
-                    Tokens.Add(new Token(TokenType.Unknown, Value, Line, StartColumn));
+                    if (Value.Length == 2 && Value[0] == '\\')
+                    {
+                        AddDiagnostic(StartLine, StartColumn, Line, Column, $"Invalid escape sequence: '\\{Value[1]}'", "CY0005");
+                    }
+                    else
+                    {
+                        AddDiagnostic(StartLine, StartColumn, Line, Column, "Invalid character literal; must contain exactly one character or a valid escape sequence", "CY0004");
+                    }
+                    Tokens.Add(new Token(TokenType.Unknown, Value, StartLine, StartColumn));
                 }
             }
             else
             {
-                Tokens.Add(new Token(TokenType.Unknown, Value, Line, StartColumn));
+                AddDiagnostic(StartLine, StartColumn, Line, Column, "Unterminated character literal; expected '\''", "CY0006");
+                Tokens.Add(new Token(TokenType.Unknown, Value, StartLine, StartColumn));
             }
         }
         private void ReadNumber()
@@ -520,23 +536,24 @@ namespace CypherCompiler
             string Value = "";
             int StartColumn = Column;
             bool IsFloat = false;
-            while (Index < Source.Length && (char.IsDigit(Source[Index]) || Source[Index] == '.'))
+            while (Index < Source.Length && char.IsDigit(Source[Index]))
             {
-                if (Source[Index] == '.')
-                {
-                    if (IsFloat)
-                    {
-                        break;
-                    }
-                    if (Index + 1 >= Source.Length || !char.IsDigit(Source[Index + 1]))
-                    {
-                        break;
-                    }
-                    IsFloat = true;
-                }
                 Value += Source[Index];
                 Index++;
                 Column++;
+            }
+            if (Index < Source.Length && Source[Index] == '.' && Index + 1 < Source.Length && char.IsDigit(Source[Index + 1]))
+            {
+                IsFloat = true;
+                Value += Source[Index];
+                Index++;
+                Column++;
+                while (Index < Source.Length && char.IsDigit(Source[Index]))
+                {
+                    Value += Source[Index];
+                    Index++;
+                    Column++;
+                }
             }
             TokenType Type = IsFloat ? TokenType.FloatLiteral : TokenType.IntLiteral;
             Tokens.Add(new Token(Type, Value, Line, StartColumn));
@@ -581,13 +598,19 @@ namespace CypherCompiler
                 "readonly" => TokenType.KeywordReadonly,
                 "abstract" => TokenType.KeywordAbstract,
                 "interface" => TokenType.KeywordInterface,
-                "form" => TokenType.KeywordForm,
+                "from" => TokenType.KeywordFrom,
                 "virtual" => TokenType.KeywordVirtual,
                 "override" => TokenType.KeywordOverride,
                 "base" => TokenType.KeywordBase,
                 "this" => TokenType.KeywordThis,
                 "internal" => TokenType.KeywordInternal,
                 "protected" => TokenType.KeywordProtected,
+                "property" => TokenType.KeywordProperty,
+                "get" => TokenType.KeywordGet,
+                "set" => TokenType.KeywordSet,
+                "delete" => TokenType.KeywordDelete,
+                "null" => TokenType.KeywordNull,
+                "new" => TokenType.KeywordNew,
                 _ => TokenType.Identifier
             };
             Tokens.Add(new Token(Type, Value, Line, StartColumn));

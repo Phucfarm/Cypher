@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="CypherCLI/CypherCLI.csproj" Id="c4bc83f1-7b75-41ea-ab81-d0415185e31e" />
   <Project Path="CypherCompiler/CypherCompiler.csproj" />
 </Solution>

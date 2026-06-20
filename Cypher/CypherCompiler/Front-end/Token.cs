@@ -9,12 +9,14 @@ namespace CypherCompiler
         KeywordFn, KeywordStruct, KeywordClass, KeywordEnum,
         KeywordInt, KeywordFloat, KeywordString, KeywordBool, KeywordChar,
         KeywordVoid, KeywordTrue, KeywordFalse,
+        KeywordNull, KeywordNew, KeywordDelete, //dòng mới
         KeywordIf, KeywordElse, KeywordFor, KeywordIn,
         KeywordReturn, KeywordBreak, KeywordNext,
         KeywordPublic, KeywordPrivate, KeywordProtected, KeywordInternal,
-        KeywordAbstract, KeywordInterface, KeywordForm,
+        KeywordAbstract, KeywordInterface, KeywordFrom,
         KeywordVirtual, KeywordOverride, KeywordBase, KeywordThis,
         KeywordStatic, KeywordConst, KeywordReadonly,
+        KeywordProperty, KeywordGet, KeywordSet,
         KeywordUse, KeywordSpace,
 
         Identifier, IntLiteral, FloatLiteral, StringLiteral, CharLiteral,

@@ -9,7 +9,7 @@ namespace CypherCompiler
         static void Main(string[] args)
         {
             Lexer L = new();
-            List<Token> Tokens = L.Tokenize(File.ReadAllText(@"D:\codecuabeo\Cypher\Test\Test.cypher"));
+            List<Token> Tokens = L.Tokenize(File.ReadAllText(@"D:\codecuabeo\Cypher\Test\Test.cy"));
             foreach (var TokenItem in Tokens)
             {
                 Console.WriteLine(TokenItem.ToString());
