@@ -498,6 +498,13 @@ namespace CypherCompiler
             Column++;
             while (Index < Source.Length && Source[Index] != '\'' && Source[Index] != '\n' && Source[Index] != '\r')
             {
+                if (Source[Index] == '\\' && Index + 1 < Source.Length)
+                {
+                    Value += Source[Index].ToString() + Source[Index + 1].ToString();
+                    Index += 2;
+                    Column += 2;
+                    continue;
+                }
                 Value += Source[Index];
                 Index++;
                 Column++;
@@ -611,6 +618,12 @@ namespace CypherCompiler
                 "delete" => TokenType.KeywordDelete,
                 "null" => TokenType.KeywordNull,
                 "new" => TokenType.KeywordNew,
+                "as" => TokenType.KeywordAs,
+                "is" => TokenType.KeywordIs,
+                "try" => TokenType.KeywordTry,
+                "catch" => TokenType.KeywordCatch,
+                "finally" => TokenType.KeywordFinally,
+                "throw" => TokenType.KeywordThrow,
                 _ => TokenType.Identifier
             };
             Tokens.Add(new Token(Type, Value, Line, StartColumn));

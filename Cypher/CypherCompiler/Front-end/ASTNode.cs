@@ -5,15 +5,19 @@ namespace CypherCompiler
     #region Base Nodes
     public abstract class AstNode
     {
+
     }
     public abstract class ExpressionNode : AstNode
     {
+
     }
     public abstract class StatementNode : AstNode
     {
+
     }
     public abstract class DeclarationNode : StatementNode
     {
+
     }
     // Thằng này chuyên bọc thông tin về kiểu dữ liệu (ví dụ: 'int', 'float', 'Point'). LLVM cực kỳ cần cái này để định hình vùng nhớ.
     public class TypeSyntax : AstNode
@@ -61,11 +65,11 @@ namespace CypherCompiler
             Members = MembersParam;
         }
     }
-    // Thằng đa năng bọc class, struct, interface. Lưu đầy đủ modifier, danh sách cha (BaseTypes) để sau này LLVM tạo cấu trúc bảng ảo (VTable).
+    // Thằng đa năng bọc class, struct, interface. Lưu KeywordToken để phân biệt loại thực thể (Class/Struct/Interface) xuống LLVM sinh mã vùng nhớ tương ứng.
     public class TypeDeclarationNode : DeclarationNode
     {
         public List<Token> Modifiers { get; init; }
-        public Token KeywordToken { get; init; }
+        public Token KeywordToken { get; init; } // Bắt trúng KeywordClass, KeywordStruct, KeywordInterface
         public Token IdentifierToken { get; init; }
         public List<TypeSyntax> BaseTypes { get; init; }
         public List<AstNode> Members { get; init; }
@@ -78,19 +82,21 @@ namespace CypherCompiler
             Members = MembersParam;
         }
     }
-    // Thằng riêng biệt dành cho Enum. LLVM bắt buộc phải biết kiểu nền (UnderlyingType, ví dụ 'int' trong 'from int') để tạo kiểu dữ liệu nguyên thể tương ứng.
+    // Thằng riêng biệt dành cho Enum. Bắt cả EnumToken và FromToken để LLVM định hình UnderlyingType tĩnh.
     public class EnumDeclarationNode : DeclarationNode
     {
         public List<Token> Modifiers { get; init; }
         public Token EnumToken { get; init; }
         public Token IdentifierToken { get; init; }
+        public Token FromToken { get; init; } // Bắt KeywordFrom phục vụ cú pháp 'from int'
         public TypeSyntax UnderlyingType { get; init; }
         public List<EnumMemberSyntax> Members { get; init; }
-        public EnumDeclarationNode(List<Token> ModifiersParam, Token EnumTokenParam, Token IdentifierTokenParam, TypeSyntax UnderlyingTypeParam, List<EnumMemberSyntax> MembersParam)
+        public EnumDeclarationNode(List<Token> ModifiersParam, Token EnumTokenParam, Token IdentifierTokenParam, Token FromTokenParam, TypeSyntax UnderlyingTypeParam, List<EnumMemberSyntax> MembersParam)
         {
             Modifiers = ModifiersParam;
             EnumToken = EnumTokenParam;
             IdentifierToken = IdentifierTokenParam;
+            FromToken = FromTokenParam;
             UnderlyingType = UnderlyingTypeParam;
             Members = MembersParam;
         }
@@ -166,20 +172,33 @@ namespace CypherCompiler
             Initializer = InitializerParam;
         }
     }
-    // Thằng property. Giữ nguyên cấu trúc để tầng phân tích ngữ nghĩa (Binder) sau này tự động tách thành các hàm getter/setter ẩn cho LLVM thực thi.
+    // Thằng property. Giữ danh sách Accessors để tách biệt rõ ràng khối hàm get/set ẩn, khớp mượt với KeywordGet và KeywordSet.
     public class PropertyDeclarationNode : DeclarationNode
     {
         public List<Token> Modifiers { get; init; }
         public Token PropertyToken { get; init; }
         public TypeSyntax Type { get; init; }
         public Token IdentifierToken { get; init; }
-        public AstNode Body { get; init; }
-        public PropertyDeclarationNode(List<Token> ModifiersParam, Token PropertyTokenParam, TypeSyntax TypeParam, Token IdentifierTokenParam, AstNode BodyParam)
+        public List<AccessorDeclarationSyntax> Accessors { get; init; }
+        public PropertyDeclarationNode(List<Token> ModifiersParam, Token PropertyTokenParam, TypeSyntax TypeParam, Token IdentifierTokenParam, List<AccessorDeclarationSyntax> AccessorsParam)
         {
             Modifiers = ModifiersParam;
             PropertyToken = PropertyTokenParam;
             Type = TypeParam;
             IdentifierToken = IdentifierTokenParam;
+            Accessors = AccessorsParam;
+        }
+    }
+    // Thằng bọc riêng từng khối get hoặc set bên trong Property. Khớp chính xác với KeywordGet và KeywordSet.
+    public class AccessorDeclarationSyntax : AstNode
+    {
+        public List<Token> Modifiers { get; init; }
+        public Token KeywordToken { get; init; } // Nhận KeywordGet hoặc KeywordSet
+        public BlockStatementNode Body { get; init; }
+        public AccessorDeclarationSyntax(List<Token> ModifiersParam, Token KeywordTokenParam, BlockStatementNode BodyParam)
+        {
+            Modifiers = ModifiersParam;
+            KeywordToken = KeywordTokenParam;
             Body = BodyParam;
         }
     }
@@ -212,6 +231,19 @@ namespace CypherCompiler
         {
             OperatorToken = OperatorTokenParam;
             Operand = OperandParam;
+        }
+    }
+    // Thằng xử lý toán tử hậu tố / tiền tố tăng giảm (ví dụ: i++, --count). Tách biệt hẳn để sinh mã tối ưu hóa thanh ghi hoặc bước lặp.
+    public class UpdateExpressionNode : ExpressionNode
+    {
+        public Token OperatorToken { get; init; }
+        public ExpressionNode Operand { get; init; }
+        public bool IsPostfix { get; init; }
+        public UpdateExpressionNode(Token OperatorTokenParam, ExpressionNode OperandParam, bool IsPostfixParam)
+        {
+            OperatorToken = OperatorTokenParam;
+            Operand = OperandParam;
+            IsPostfix = IsPostfixParam;
         }
     }
     // Thằng gánh team tính toán nhị phân (ví dụ: a + b, x * y, i == 0). Gom hai vế Left/Right để Binder check ép kiểu và LLVM gen lệnh toán hạng.
@@ -262,6 +294,62 @@ namespace CypherCompiler
             Expression = ExpressionParam;
             OperatorToken = OperatorTokenParam;
             MemberToken = MemberTokenParam;
+        }
+    }
+    // Thằng truy cập mảng bằng chỉ mục (ví dụ: array[i], map["key"]). Giữ biểu thức gốc và biểu thức nằm trong ngoặc vuông để sinh lệnh GEP của LLVM.
+    public class IndexAccessExpressionNode : ExpressionNode
+    {
+        public ExpressionNode Target { get; init; }
+        public Token OpenBracketToken { get; init; }
+        public ExpressionNode Index { get; init; }
+        public Token CloseBracketToken { get; init; }
+        public IndexAccessExpressionNode(ExpressionNode TargetParam, Token OpenBracketTokenParam, ExpressionNode IndexParam, Token CloseBracketTokenParam)
+        {
+            Target = TargetParam;
+            OpenBracketToken = OpenBracketTokenParam;
+            Index = IndexParam;
+            CloseBracketToken = CloseBracketTokenParam;
+        }
+    }
+    // Thằng xử lý ép kiểu tường minh dạng an toàn không ném lỗi (ví dụ: obj as Point). Trả về đối tượng hoặc null nếu fail.
+    public class AsExpressionNode : ExpressionNode
+    {
+        public ExpressionNode Expression { get; init; }
+        public Token AsToken { get; init; }
+        public TypeSyntax TargetType { get; init; }
+        public AsExpressionNode(ExpressionNode ExpressionParam, Token AsTokenParam, TypeSyntax TargetTypeParam)
+        {
+            Expression = ExpressionParam;
+            AsToken = AsTokenParam;
+            TargetType = TargetTypeParam;
+        }
+    }
+    // Thằng kiểm tra kiểu dữ liệu (ví dụ: obj is Point). Trả về kiểu boolean (true/false) để LLVM tối ưu hóa rẽ nhánh rập khuôn.
+    public class IsExpressionNode : ExpressionNode
+    {
+        public ExpressionNode Expression { get; init; }
+        public Token IsToken { get; init; }
+        public TypeSyntax TargetType { get; init; }
+        public IsExpressionNode(ExpressionNode ExpressionParam, Token IsTokenParam, TypeSyntax TargetTypeParam)
+        {
+            Expression = ExpressionParam;
+            IsToken = IsTokenParam;
+            TargetType = TargetTypeParam;
+        }
+    }
+    // Thằng xử lý ép kiểu tường minh truyền thống (ví dụ: (int)myFloat). Giúp tầng Binder xác thực ép kiểu an toàn trước khi hạ xuống LLVM sinh lệnh conversion.
+    public class CastExpressionNode : ExpressionNode
+    {
+        public Token OpenParenToken { get; init; }
+        public TypeSyntax TargetType { get; init; }
+        public Token CloseParenToken { get; init; }
+        public ExpressionNode Expression { get; init; }
+        public CastExpressionNode(Token OpenParenTokenParam, TypeSyntax TargetTypeParam, Token CloseParenTokenParam, ExpressionNode ExpressionParam)
+        {
+            OpenParenToken = OpenParenTokenParam;
+            TargetType = TargetTypeParam;
+            CloseParenToken = CloseParenTokenParam;
+            Expression = ExpressionParam;
         }
     }
     // Thằng bọc biểu thức khởi tạo vùng nhớ mới (ví dụ: new Point(10, 20)). Giữ Type để biết size cần cấp phát và Arguments để gọi trúng Constructor.
@@ -421,6 +509,60 @@ namespace CypherCompiler
             InToken = InTokenParam;
             Collection = CollectionParam;
             Body = BodyParam;
+        }
+    }
+    // Câu lệnh kiểm soát try-catch-finally. LLVM sẽ dựa vào cấu trúc này để sinh các khối đáp ứng Landing Pad của cơ chế Zero-cost Exception Handling (giống Clang C++).
+    public class TryStatementNode : StatementNode
+    {
+        public Token TryToken { get; init; }
+        public BlockStatementNode TryBlock { get; init; }
+        public List<CatchClauseSyntax> CatchClauses { get; init; }
+        public Token FinallyToken { get; init; }
+        public BlockStatementNode FinallyBlock { get; init; } // Có thể null nếu không khai báo block finally
+        public TryStatementNode(Token TryTokenParam, BlockStatementNode TryBlockParam, List<CatchClauseSyntax> CatchClausesParam, Token FinallyTokenParam, BlockStatementNode FinallyBlockParam)
+        {
+            TryToken = TryTokenParam;
+            TryBlock = TryBlockParam;
+            CatchClauses = CatchClausesParam;
+            FinallyToken = FinallyTokenParam;
+            FinallyBlock = FinallyBlockParam;
+        }
+    }
+    // Mệnh đề bắt lỗi trong cụm Try. Theo cú pháp Cypher, CatchType và IdentifierToken hoàn toàn có thể null (Ví dụ case: catch { ... } gom toàn bộ lỗi).
+    public class CatchClauseSyntax : AstNode
+    {
+        public Token CatchToken { get; init; }
+        public TypeSyntax CatchType { get; init; } // Null nếu ghi 'catch { ... }'
+        public Token IdentifierToken { get; init; } // Null nếu ghi 'catch { ... }' hoặc catch không gán biến
+        public BlockStatementNode Block { get; init; }
+        public CatchClauseSyntax(Token CatchTokenParam, TypeSyntax CatchTypeParam, Token IdentifierTokenParam, BlockStatementNode BlockParam)
+        {
+            CatchToken = CatchTokenParam;
+            CatchType = CatchTypeParam;
+            IdentifierToken = IdentifierTokenParam;
+            Block = BlockParam;
+        }
+    }
+    // Câu lệnh ném ra một Exception. Hỗ trợ ném bất kỳ kiểu dữ liệu nào (int, float, string...). 
+    public class ThrowStatementNode : StatementNode
+    {
+        public Token ThrowToken { get; init; }
+        public ExpressionNode Expression { get; init; } // Chứa biểu thức giá trị bị ném ra
+        public ThrowStatementNode(Token ThrowTokenParam, ExpressionNode ExpressionParam)
+        {
+            ThrowToken = ThrowTokenParam;
+            Expression = ExpressionParam;
+        }
+    }
+    // Câu lệnh giải phóng bộ nhớ thủ công cho đối tượng/vùng nhớ con trỏ. Khớp hoàn toàn với KeywordDelete.
+    public class DeleteStatementNode : StatementNode
+    {
+        public Token DeleteToken { get; init; } // Bắt KeywordDelete
+        public ExpressionNode Expression { get; init; }
+        public DeleteStatementNode(Token DeleteTokenParam, ExpressionNode ExpressionParam)
+        {
+            DeleteToken = DeleteTokenParam;
+            Expression = ExpressionParam;
         }
     }
     // Lệnh nhảy thoát khỏi hàm (return) kèm giá trị trả về tùy chọn. LLVM dựa vào đây để bắn lệnh 'ret'.
